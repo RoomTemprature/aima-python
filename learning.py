@@ -23,7 +23,7 @@ def euclidean_distance(X, Y):
     return math.sqrt(sum((x - y)**2 for x, y in zip(X, Y)))
 
 
-def cross_entropy_loss(X,Y):
+def cross_entropy_loss(X, Y):
     n=len(X)
     return (-1.0/n)*sum(x*math.log(y) + (1-x)*math.log(1-y) for x, y in zip(X, Y))
 
@@ -97,11 +97,13 @@ class DataSet:
         # Initialize .examples from string or list or data directory
         if isinstance(examples, str):
             self.examples = parse_csv(examples)
+        elif examples is None:
+            self.examples = parse_csv(open_data(name + '.csv').read())
         else:
-            self.examples = examples or parse_csv(open_data(name + '.csv').read())
+            self.examples = examples
 
-        # Attrs are the indices of examples, unless otherwise stated.
-        if self.examples and not attrs:
+        # Attrs are the indices of examples, unless otherwise stated.   
+        if self.examples is not None and attrs is None:
             attrs = list(range(len(self.examples[0])))
 
         self.attrs = attrs
@@ -178,7 +180,7 @@ class DataSet:
         for item in self.examples:
             item[self.target] = classes.index(item[self.target])
 
-    def remove_examples(self, value=""):
+    def remove_examples(self, value=''):
         """Remove examples that contain given value."""
         self.examples = [x for x in self.examples if value not in x]
         self.update_values()
@@ -458,9 +460,15 @@ def truncated_svd(X, num_val=2, max_iter=1000):
 
         projected_X = matrix_multiplication(A, [[x] for x in X])
         projected_X = [x[0] for x in projected_X]
-        eivals.append(norm(projected_X, 1)/norm(X, 1))
-        eivec_m.append(X[:m])
-        eivec_n.append(X[m:])
+        new_eigenvalue = norm(projected_X, 1)/norm(X, 1)
+        ev_m = X[:m]
+        ev_n = X[m:]
+        if new_eigenvalue < 0:
+            new_eigenvalue = -new_eigenvalue
+            ev_m = [-ev_m_i for ev_m_i in ev_m]
+        eivals.append(new_eigenvalue)
+        eivec_m.append(ev_m)
+        eivec_n.append(ev_n)
     return (eivec_m, eivec_n, eivals)
 
 # ______________________________________________________________________________
@@ -652,15 +660,14 @@ def DecisionListLearner(dataset):
 # ______________________________________________________________________________
 
 
-def NeuralNetLearner(dataset, hidden_layer_sizes=None,
-                     learning_rate=0.01, epochs=100, activation = sigmoid):
+def NeuralNetLearner(dataset, hidden_layer_sizes=[3],
+                     learning_rate=0.01, epochs=100, activation=sigmoid):
     """Layered feed-forward network.
     hidden_layer_sizes: List of number of hidden units per hidden layer
     learning_rate: Learning rate of gradient descent
     epochs: Number of passes over the dataset
     """
 
-    hidden_layer_sizes = hidden_layer_sizes or [3]  # default value
     i_units = len(dataset.inputs)
     o_units = len(dataset.values[dataset.target])
 
@@ -836,11 +843,7 @@ def network(input_units, hidden_layer_sizes, output_units, activation=sigmoid):
     hidden_layers_sizes : List number of neuron units in each hidden layer
     excluding input and output layers
     """
-    # Check for PerceptronLearner
-    if hidden_layer_sizes:
-        layers_sizes = [input_units] + hidden_layer_sizes + [output_units]
-    else:
-        layers_sizes = [input_units] + [output_units]
+    layers_sizes = [input_units] + hidden_layer_sizes + [output_units]
 
     net = [[NNUnit(activation) for n in range(size)]
            for size in layers_sizes]
@@ -856,12 +859,9 @@ def network(input_units, hidden_layer_sizes, output_units, activation=sigmoid):
 
 
 def init_examples(examples, idx_i, idx_t, o_units):
-    inputs = {}
-    targets = {}
+    inputs, targets = {}, {}
 
-    for i in range(len(examples)):
-        e = examples[i]
-
+    for i, e in enumerate(examples):
         # Input values of e
         inputs[i] = [e[i] for i in idx_i]
 
@@ -1046,13 +1046,25 @@ def grade_learner(predict, tests):
     return mean(int(predict(X) == y) for X, y in tests)
 
 
-def train_test_split(dataset, start, end):
-    """Reserve dataset.examples[start:end] for test; train on the remainder."""
-    start = int(start)
-    end = int(end)
+def train_test_split(dataset, start=None, end=None, test_split=None):
+    """If you are giving 'start' and 'end' as parameters,
+    then it will return the testing set from index 'start' to 'end'
+    and the rest for training.
+    If you give 'test_split' as a parameter then it will return 
+    test_split * 100% as the testing set and the rest as 
+    training set.
+    """
     examples = dataset.examples
-    train = examples[:start] + examples[end:]
-    val = examples[start:end]
+    if test_split == None:
+        train = examples[:start] + examples[end:]
+        val = examples[start:end]
+    else:
+        total_size = len(examples)
+        val_size = int(total_size * test_split)
+        train_size = total_size - val_size
+        train = examples[:train_size]
+        val = examples[train_size:total_size]
+
     return train, val
 
 
@@ -1076,8 +1088,8 @@ def cross_validation(learner, size, dataset, k=10, trials=1):
         fold_errV = 0
         n = len(dataset.examples)
         examples = dataset.examples
+        random.shuffle(dataset.examples)
         for fold in range(k):
-            random.shuffle(dataset.examples)
             train_data, val_data = train_test_split(dataset, fold * (n / k),
                                                     (fold + 1) * (n / k))
             dataset.examples = train_data
@@ -1248,9 +1260,7 @@ def ContinuousXor(n):
 # ______________________________________________________________________________
 
 
-def compare(algorithms=None,
-            datasets=None,
-            k=10, trials=1):
+def compare(algorithms=None, datasets=None, k=10, trials=1):
     """Compare various learners on various datasets using cross-validation.
     Print results as a table."""
     algorithms = algorithms or [PluralityLearner, NaiveBayesLearner,                 # default list
